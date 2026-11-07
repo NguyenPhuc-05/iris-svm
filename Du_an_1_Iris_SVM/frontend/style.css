@@ -390,6 +390,14 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);line-height:
 .input-group label { font-size: 0.85rem; font-weight: 600; color: var(--text-sec); }
 .input-group input { padding: 0.75rem; border-radius: 10px; border: 1px solid var(--glass-border); background: var(--glass-bg); color: var(--text); font-family: var(--font); outline: none; }
 .input-group input:focus { border-color: var(--c4); box-shadow: 0 0 0 3px var(--accent-glow); }
+.password-field { position: relative; display: flex; }
+.password-field input { width: 100%; box-sizing: border-box; padding-right: 2.9rem; }
+.pass-toggle { position: absolute; top: 50%; right: 0.35rem; transform: translateY(-50%); display: flex; align-items: center; justify-content: center; width: 2.2rem; height: 2.2rem; padding: 0; border: none; border-radius: 8px; background: transparent; color: var(--text-sec); cursor: pointer; }
+.pass-toggle:hover { color: var(--c4); }
+.pass-toggle:focus-visible { outline: 2px solid var(--c4); outline-offset: 1px; }
+.pass-toggle .icon-eye-off { display: none; }
+.pass-toggle[aria-pressed="true"] .icon-eye { display: none; }
+.pass-toggle[aria-pressed="true"] .icon-eye-off { display: block; }
 .auth-switch { text-align: center; font-size: 0.85rem; color: var(--text-sec); margin-top: 1rem; }
 .user-badge { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 700; color: var(--c1); background: var(--glass-bg); padding: 0.2rem 0.2rem 0.2rem 0.8rem; border-radius: 20px; border: 1px solid var(--glass-border); }
 [data-theme="dark"] .user-badge { color: var(--c5); }
