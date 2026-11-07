@@ -1,3 +1,4 @@
+import hashlib
 import os
 from typing import Optional
 
@@ -11,6 +12,19 @@ security = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET or len(JWT_SECRET) < 32:
     raise RuntimeError("JWT_SECRET environment variable is missing or shorter than 32 characters.")
+
+# Các JWT_SECRET mặc định/mẫu từng lộ công khai trong repo (chỉ lưu SHA-256).
+# Cùng danh sách với identity_service/app/public_secrets.py; iris-svm-api không
+# import được module đó nên lặp lại ở đây.
+_PUBLIC_JWT_SECRET_DIGESTS = {
+    "57dc58ab6a5430ed24e4790c53e8e116fcee101d28b7ae6e693a6b4e4f7d1e9f",
+    "9fea218fda99ce46fc1c1eeab3665cdeaa6c5682c068b6455e3116bdd05d6d86",
+}
+if hashlib.sha256(JWT_SECRET.strip().encode("utf-8")).hexdigest() in _PUBLIC_JWT_SECRET_DIGESTS:
+    raise RuntimeError(
+        "JWT_SECRET is a publicly known default value from the repository. "
+        'Generate a new one: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+    )
 
 
 def get_current_user(

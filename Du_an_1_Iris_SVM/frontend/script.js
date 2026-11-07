@@ -171,7 +171,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (appContainer) appContainer.style.display = 'block';
             if (userBadge) userBadge.hidden = false;
             if (navUsername) {
-                navUsername.innerHTML = currentUsername + (isOwner ? ' <span style="background:rgba(245,158,11,0.2);color:#f59e0b;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;margin-left:4px;">👑 Chủ sở hữu</span>' : '');
+                navUsername.innerHTML = escapeHtml(currentUsername) + (isOwner ? ' <span style="background:rgba(245,158,11,0.2);color:#f59e0b;padding:2px 8px;border-radius:12px;font-size:0.75rem;font-weight:600;margin-left:4px;">👑 Chủ sở hữu</span>' : '');
             }
             const adminTabBtn = document.getElementById('tab-btn-admin');
             if (adminTabBtn) {
@@ -1457,13 +1457,13 @@ function renderHistoryTable(history) {
         return `
             <tr data-id="${h.id}">
                 <td>${i + 1}</td>
-                <td><span style="font-size:0.8rem;color:var(--primary);font-weight:600">@${h.username || 'unknown'}</span></td>
+                <td><span style="font-size:0.8rem;color:var(--primary);font-weight:600">@${escapeHtml(h.username || 'unknown')}</span></td>
                 <td>${h.sepal_length.toFixed(1)}</td>
                 <td>${h.sepal_width.toFixed(1)}</td>
                 <td>${h.petal_length.toFixed(1)}</td>
                 <td>${h.petal_width.toFixed(1)}</td>
-                <td><span style="font-size:.75rem;font-weight:600;color:var(--text-sec);text-transform:uppercase">${h.kernel || 'rbf'}</span></td>
-                <td><span class="sp-badge ${h.prediction}">${h.prediction}</span></td>
+                <td><span style="font-size:.75rem;font-weight:600;color:var(--text-sec);text-transform:uppercase">${escapeHtml(h.kernel || 'rbf')}</span></td>
+                <td><span class="sp-badge ${escapeHtml(h.prediction)}">${escapeHtml(h.prediction)}</span></td>
                 <td><strong>${(h.probability * 100).toFixed(1)}%</strong></td>
                 <td style="font-size:.74rem;color:var(--text-sec)">${timeStr}</td>
             </tr>

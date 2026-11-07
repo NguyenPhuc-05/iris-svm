@@ -1,28 +1,39 @@
 import os
+import re
 import hmac
+import threading
+import time
 import bcrypt
+from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 try:
     from app.db import get_db
     from app.models import Client, User, init_db
+    from app.public_secrets import is_public_secret
 except (ImportError, ModuleNotFoundError):
     from identity_service.app.db import get_db
     from identity_service.app.models import Client, User, init_db
+    from identity_service.app.public_secrets import is_public_secret
 
 # JWT configuration
 JWT_SECRET = os.getenv("JWT_SECRET")
 if not JWT_SECRET or len(JWT_SECRET) < 32:
     raise RuntimeError("JWT_SECRET environment variable is missing or shorter than 32 characters.")
+if is_public_secret(JWT_SECRET):
+    raise RuntimeError(
+        "JWT_SECRET is a publicly known default value from the repository. "
+        'Generate a new one: python -c "import secrets; print(secrets.token_urlsafe(48))"'
+    )
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_MINUTES = 60
 
@@ -60,9 +71,22 @@ app.add_middleware(
 
 # ─── Pydantic Schemas ───
 
+# Định dạng email đơn giản nhưng đủ chặt: không khoảng trắng, không ký tự HTML
+# (< > " ' &) để email không thể mang mã độc khi được hiển thị trên giao diện.
+EMAIL_PATTERN = re.compile(r"^[^@\s<>\"'&]+@[^@\s<>\"'&]+\.[^@\s<>\"'&]+$")
+
+
 class RegisterRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, value: str) -> str:
+        value = value.strip()
+        if not EMAIL_PATTERN.match(value):
+            raise ValueError("Email không hợp lệ")
+        return value
 
 
 class LoginRequest(BaseModel):
@@ -82,6 +106,95 @@ class UserResponse(BaseModel):
     id: int
     email: str
     is_owner: bool = False
+
+
+# ─── Login rate limiting ───
+
+class LoginRateLimiter:
+    """Giới hạn số lần đăng nhập sai (trong bộ nhớ, đủ cho một instance Render).
+
+    - Mỗi cặp (IP, email): tối đa `max_per_ip_email` lần sai trong `window_seconds`.
+    - Mỗi email (mọi IP): tối đa `max_per_email` lần sai, chặn việc đổi IP/giả
+      header X-Forwarded-For để vượt giới hạn trên.
+    Trạng thái mất khi service khởi động lại, vì vậy đây là lớp phòng thủ bổ sung,
+    không thay thế mật khẩu mạnh.
+    """
+
+    def __init__(
+        self,
+        max_per_ip_email: int = 5,
+        max_per_email: int = 30,
+        window_seconds: int = 15 * 60,
+        max_keys: int = 10_000,
+    ):
+        self.max_per_ip_email = max_per_ip_email
+        self.max_per_email = max_per_email
+        self.window = window_seconds
+        self.max_keys = max_keys
+        self._failures: dict[tuple, deque] = {}
+        self._lock = threading.Lock()
+
+    def _keys(self, ip: str, email: str) -> tuple[tuple, tuple]:
+        email = email[:255]
+        return ("ie", ip, email), ("e", email)
+
+    def _live(self, key: tuple, now: float) -> deque:
+        dq = self._failures.get(key)
+        if dq is None:
+            return deque()
+        while dq and now - dq[0] > self.window:
+            dq.popleft()
+        if not dq:
+            self._failures.pop(key, None)
+        return dq
+
+    def retry_after(self, ip: str, email: str) -> int:
+        """Số giây phải chờ nếu đang bị chặn, 0 nếu được phép thử."""
+        now = time.monotonic()
+        ie_key, e_key = self._keys(ip, email)
+        wait = 0
+        with self._lock:
+            for key, limit in ((ie_key, self.max_per_ip_email), (e_key, self.max_per_email)):
+                dq = self._live(key, now)
+                if len(dq) >= limit:
+                    wait = max(wait, int(self.window - (now - dq[0])) + 1)
+        return wait
+
+    def record_failure(self, ip: str, email: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            for key in self._keys(ip, email):
+                self._failures.setdefault(key, deque()).append(now)
+            if len(self._failures) > self.max_keys:
+                self._evict(now)
+
+    def reset(self, ip: str, email: str) -> None:
+        """Xóa bộ đếm của cặp (IP, email) sau khi đăng nhập thành công."""
+        with self._lock:
+            self._failures.pop(self._keys(ip, email)[0], None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._failures.clear()
+
+    def _evict(self, now: float) -> None:
+        for key in list(self._failures):
+            self._live(key, now)
+        while len(self._failures) > self.max_keys:
+            oldest = min(self._failures, key=lambda k: self._failures[k][-1])
+            self._failures.pop(oldest, None)
+
+
+login_limiter = LoginRateLimiter()
+
+
+def client_ip(request: Request) -> str:
+    # Sau proxy của Render, IP thật nằm ở phần tử đầu của X-Forwarded-For.
+    forwarded = request.headers.get("x-forwarded-for", "")
+    first = forwarded.split(",")[0].strip()
+    if first:
+        return first[:64]
+    return request.client.host if request.client else "unknown"
 
 
 # ─── Auth Helper Functions ───
@@ -181,7 +294,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
+def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)):
     # 1. Validate client_id
     client = db.query(Client).filter(Client.client_id == payload.client_id).first()
     if not client:
@@ -194,6 +307,16 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     # Self-heal the configured Owner account if the database contains an old
     # password hash (or the row was lost during an ephemeral SQLite restart).
     normalized_email = payload.email.strip().lower()
+    ip = client_ip(request)
+
+    # Chặn dò mật khẩu: quá nhiều lần sai thì từ chối trước khi kiểm tra.
+    wait_seconds = login_limiter.retry_after(ip, normalized_email)
+    if wait_seconds:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Đăng nhập sai quá nhiều lần. Vui lòng thử lại sau {wait_seconds // 60 + 1} phút.",
+            headers={"Retry-After": str(wait_seconds)},
+        )
     owner_email = os.getenv("OWNER_EMAIL", "admin@ml-dl-ai.local").strip().lower()
     raw_owner_password = os.getenv("OWNER_PASSWORD") or ""
     user = db.query(User).filter(User.email == normalized_email).first()
@@ -203,7 +326,13 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     # 500 error. Also accept the secret with stray leading/trailing whitespace
     # removed, since copy-pasting a secret into Render often adds a newline.
     submitted_bytes = payload.password.encode("utf-8")
-    owner_candidates = {raw_owner_password, raw_owner_password.strip()} - {""}
+    # A publicly known default password (it appeared in the public git history)
+    # is never accepted as the owner secret.
+    owner_candidates = {
+        candidate
+        for candidate in (raw_owner_password, raw_owner_password.strip())
+        if candidate and not is_public_secret(candidate)
+    }
     is_configured_owner = normalized_email == owner_email and any(
         hmac.compare_digest(submitted_bytes, candidate.encode("utf-8"))
         for candidate in owner_candidates
@@ -236,10 +365,13 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         not is_configured_owner
         and not verify_password(payload.password, user.password_hash)
     ):
+        login_limiter.record_failure(ip, normalized_email)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sai email hoặc mật khẩu",
         )
+
+    login_limiter.reset(ip, normalized_email)
 
     # 3. Cập nhật last_login_at
     user.last_login_at = datetime.now(timezone.utc)

@@ -6,7 +6,10 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 # Dùng MySQL làm CSDL chính thức (theo yêu cầu của Giảng viên).
 # Tạo database 'iris_svm' trong MySQL trước khi chạy.
-DATABASE_URL = os.getenv("DATABASE_URL", "mysql+pymysql://root:@localhost:3306/iris_svm")
+DATABASE_URL = os.getenv("DATABASE_URL") or "mysql+pymysql://root:@localhost:3306/iris_svm"
+# Render/Heroku cấp URL "postgres://..." nhưng SQLAlchemy 2.x chỉ nhận "postgresql://...".
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
 
 # Thư mục chứa file SQLite fallback (cùng thư mục với module này)
 _FALLBACK_DB = Path(__file__).resolve().parent / "iris_fallback.db"
@@ -16,7 +19,8 @@ try:
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    print(f"[DB] Kết nối MySQL thành công: {DATABASE_URL}")
+    # Không in mật khẩu CSDL ra log (log của Render có thể bị người khác xem).
+    print(f"[DB] Kết nối CSDL thành công: {engine.url.render_as_string(hide_password=True)}")
 except Exception:
     print("[DB] Không kết nối được MySQL. Chuyển sang SQLite fallback.")
     _fallback_url = f"sqlite:///{_FALLBACK_DB.as_posix()}"
