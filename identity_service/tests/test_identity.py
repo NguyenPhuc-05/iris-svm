@@ -28,6 +28,14 @@ def setup_test_db():
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def reset_login_limiter():
+    from app.main import login_limiter
+    login_limiter.clear()
+    yield
+    login_limiter.clear()
+
+
 def test_health():
     res = client.get("/health")
     assert res.status_code == 200
@@ -224,6 +232,130 @@ def test_configured_owner_wrong_password_rejected(monkeypatch):
         json={"email": owner_email, "password": "wrong-password-xyz", "client_id": "iris-svm-api"},
     )
     assert login_res.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "bad_email",
+    [
+        "<img src=x onerror=alert(1)>@evil.com",
+        "no-at-sign.example.com",
+        "has space@example.com",
+        "quote\"@example.com",
+        "a@b",
+        "a@@example.com",
+    ],
+)
+def test_register_rejects_invalid_or_html_emails(bad_email):
+    res = client.post("/register", json={"email": bad_email, "password": "password123"})
+    assert res.status_code == 422
+
+
+def test_register_accepts_normal_email_and_normalizes_case():
+    res = client.post("/register", json={"email": "  Student.Name+1@Example.com ", "password": "password123"})
+    assert res.status_code == 201
+    assert res.json()["email"] == "student.name+1@example.com"
+
+
+def _login(email, password):
+    return client.post(
+        "/login",
+        json={"email": email, "password": password, "client_id": "iris-svm-api"},
+    )
+
+
+def test_login_is_rate_limited_after_repeated_failures():
+    client.post("/register", json={"email": "victim@example.com", "password": "password123"})
+
+    for _ in range(5):
+        assert _login("victim@example.com", "wrong-password").status_code == 401
+
+    blocked = _login("victim@example.com", "wrong-password")
+    assert blocked.status_code == 429
+    assert "Retry-After" in blocked.headers
+
+    # Even the correct password is refused while the block is active.
+    assert _login("victim@example.com", "password123").status_code == 429
+
+    # Another account is not affected.
+    client.post("/register", json={"email": "other@example.com", "password": "password123"})
+    assert _login("other@example.com", "password123").status_code == 200
+
+
+def test_successful_login_resets_failure_counter():
+    client.post("/register", json={"email": "forgetful@example.com", "password": "password123"})
+
+    for _ in range(4):
+        assert _login("forgetful@example.com", "wrong-password").status_code == 401
+    assert _login("forgetful@example.com", "password123").status_code == 200
+
+    # Counter was reset, so four more wrong tries are still allowed.
+    for _ in range(4):
+        assert _login("forgetful@example.com", "wrong-password").status_code == 401
+
+
+def test_email_wide_limit_blocks_rotating_forwarded_ips():
+    client.post("/register", json={"email": "target@example.com", "password": "password123"})
+
+    status_codes = []
+    for i in range(35):
+        res = client.post(
+            "/login",
+            json={"email": "target@example.com", "password": "wrong-password", "client_id": "iris-svm-api"},
+            headers={"X-Forwarded-For": f"203.0.113.{i}"},
+        )
+        status_codes.append(res.status_code)
+
+    assert status_codes[:30] == [401] * 30
+    assert 429 in status_codes[30:]
+
+
+LEAKED_OWNER_PASSWORD = "Admin@" + "ML2024!!"  # từng nằm trong lịch sử git công khai
+
+
+def test_is_public_secret_detects_leaked_defaults():
+    from app.public_secrets import is_public_secret
+
+    assert is_public_secret(LEAKED_OWNER_PASSWORD)
+    assert is_public_secret(LEAKED_OWNER_PASSWORD + "\n")
+    assert not is_public_secret("a-brand-new-owner-secret-0f3c9d")
+    assert not is_public_secret("")
+
+
+def test_leaked_default_owner_password_is_rejected(monkeypatch):
+    owner_email = "leaky-owner@example.com"
+    monkeypatch.setenv("OWNER_EMAIL", owner_email)
+    monkeypatch.setenv("OWNER_PASSWORD", LEAKED_OWNER_PASSWORD)
+
+    res = client.post(
+        "/login",
+        json={"email": owner_email, "password": LEAKED_OWNER_PASSWORD, "client_id": "iris-svm-api"},
+    )
+    assert res.status_code == 401
+
+
+def test_seed_owner_disables_old_hash_of_leaked_password(monkeypatch):
+    from app.db import SessionLocal
+    from app.main import hash_password
+    from app.models import User, seed_owner
+
+    owner_email = "stale-leaky-owner@example.com"
+    monkeypatch.setenv("OWNER_EMAIL", owner_email)
+    monkeypatch.setenv("OWNER_PASSWORD", LEAKED_OWNER_PASSWORD)
+
+    db = SessionLocal()
+    try:
+        db.add(User(email=owner_email, password_hash=hash_password(LEAKED_OWNER_PASSWORD), is_owner=True))
+        db.commit()
+    finally:
+        db.close()
+
+    seed_owner()
+
+    res = client.post(
+        "/login",
+        json={"email": owner_email, "password": LEAKED_OWNER_PASSWORD, "client_id": "iris-svm-api"},
+    )
+    assert res.status_code == 401
 
 
 def test_regular_user_forbidden_from_admin():

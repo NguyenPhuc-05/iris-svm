@@ -403,6 +403,44 @@ def test_admin_predictions_forbidden_for_regular_user():
     assert "chủ sở hữu" in res.json()["detail"].lower()
 
 
+def _owner_token(secret=None, exp_delta=timedelta(hours=1)):
+    secret = secret or os.environ.get("JWT_SECRET", "iris-test-jwt-secret-key-32bytes!!")
+    now = datetime.now(timezone.utc)
+    return jwt.encode(
+        {"sub": "owner-1", "email": "admin@ml-dl-ai.local", "aud": "iris-svm-api",
+         "is_owner": True, "iat": now, "exp": now + exp_delta},
+        secret,
+        algorithm="HS256",
+    )
+
+
+def test_admin_predictions_limit_is_capped():
+    headers = {"Authorization": f"Bearer {_owner_token()}"}
+    assert client.get("/admin/predictions?limit=500", headers=headers).status_code == 200
+    assert client.get("/admin/predictions?limit=501", headers=headers).status_code == 422
+    assert client.get("/admin/predictions?limit=0", headers=headers).status_code == 422
+
+
+def test_admin_predictions_requires_valid_token():
+    assert client.get("/admin/predictions").status_code == 401
+
+    forged = _owner_token(secret="a-different-secret-that-is-32-chars-long!!")
+    res = client.get("/admin/predictions", headers={"Authorization": f"Bearer {forged}"})
+    assert res.status_code == 401
+
+    expired = _owner_token(exp_delta=timedelta(hours=-1))
+    res = client.get("/admin/predictions", headers={"Authorization": f"Bearer {expired}"})
+    assert res.status_code == 401
+
+
+def test_cors_only_allows_configured_origins():
+    allowed = client.get("/health", headers={"Origin": "http://localhost:5500"})
+    assert allowed.headers.get("access-control-allow-origin") == "http://localhost:5500"
+
+    blocked = client.get("/health", headers={"Origin": "https://evil.example"})
+    assert "access-control-allow-origin" not in blocked.headers
+
+
 # ==============================================================================
 # TESTS CHO TÍNH NĂNG ĐỘT PHÁ SÁNG TẠO MỚI (KKT, 3D PCA, STRESS TEST)
 # ==============================================================================

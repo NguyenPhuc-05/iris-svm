@@ -70,6 +70,8 @@ def configured_origins() -> list[str]:
         "https://iris-svm-frontend-6s3t.onrender.com",
         "http://localhost:5500",
         "http://127.0.0.1:5500",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
     raw_origins = os.getenv("FRONTEND_ORIGINS", "")
     origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",")]
@@ -85,7 +87,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=configured_origins(),
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,15 +98,6 @@ app.add_middleware(
 
 
 # ─── Schemas ───
-class UserAuth(BaseModel):
-    username: str
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    username: str
-
 class IrisInput(BaseModel):
     sepal_length: float = Field(ge=4.0, le=8.0)
     sepal_width: float = Field(ge=2.0, le=5.0)
@@ -858,7 +851,7 @@ def get_sample_csv():
 # ====================================================================
 @app.get("/admin/predictions")
 def admin_all_predictions(
-    limit: int = 200,
+    limit: int = Query(default=200, ge=1, le=500),
     credentials=Security(HTTPBearer(auto_error=False)),
 ):
     import jwt as _jwt

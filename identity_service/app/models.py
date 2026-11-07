@@ -1,11 +1,14 @@
 import os
+import secrets
 import bcrypt
 from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, inspect, text
 try:
     from app.db import Base, engine, SessionLocal
+    from app.public_secrets import is_public_secret
 except (ImportError, ModuleNotFoundError):
     from identity_service.app.db import Base, engine, SessionLocal
+    from identity_service.app.public_secrets import is_public_secret
 
 
 class User(Base):
@@ -80,6 +83,22 @@ def seed_owner():
 
     if not owner_password:
         print("[IdP Warning] OWNER_PASSWORD is unset. Skipping owner account seeding.")
+        return
+
+    if is_public_secret(owner_password):
+        # Mật khẩu này từng nằm công khai trong repo: không được dùng cho tài khoản
+        # chủ sở hữu. Nếu tài khoản đã tồn tại với hash cũ của mật khẩu đó, vô hiệu
+        # hóa hash để không ai đăng nhập được bằng mật khẩu đã lộ.
+        print("[IdP ERROR] OWNER_PASSWORD is a publicly known default. Set a new secret on Render. Owner login is disabled.")
+        db = SessionLocal()
+        try:
+            existing = db.query(User).filter(User.email == owner_email).first()
+            if existing:
+                unusable = secrets.token_urlsafe(32).encode("utf-8")
+                existing.password_hash = bcrypt.hashpw(unusable, bcrypt.gensalt()).decode("utf-8")
+                db.commit()
+        finally:
+            db.close()
         return
 
     db = SessionLocal()

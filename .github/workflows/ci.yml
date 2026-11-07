@@ -57,11 +57,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify no leaked secrets or hardcoded passwords
+      - name: Verify no hardcoded secrets or passwords
         run: |
-          PATTERN="identity_service_""secret_key"
-          PATTERN2="Admin@""ML2024"
-          if grep -rn "${PATTERN}\|${PATTERN2}" --include=*.py --include=*.yaml --include=*.yml --include=*.md --include=*.example .; then
-            echo "Security violation: found hardcoded default secret or password!"
+          # Chỉ mã nguồn/cấu hình thật; file test dùng giá trị giả được bỏ qua.
+          # Dòng chứa giá trị mẫu (your_..., change-in-production, os.getenv) được cho phép.
+          MATCHES=$(grep -rnE "(OWNER_PASSWORD|JWT_SECRET|SECRET_KEY)[A-Za-z_]*[[:space:]]*[=:][[:space:]]*['\"]?[^[:space:]'\"$]{6,}" \
+            --include=*.py --include=*.yaml --include=*.yml --include=*.example --include=*.md \
+            --exclude-dir=tests --exclude-dir=.git . \
+            | grep -vE "your_|change-in-production|os\.getenv|os\.environ|getenv\(|sync: false|<.*>|example\.com|localhost|ci\.yml" || true)
+          if [ -n "$MATCHES" ]; then
+            echo "$MATCHES"
+            echo "Security violation: possible hardcoded secret or password (values hidden above are not printed beyond the matching line)."
+            exit 1
+          fi
+          # Khóa riêng và token của các nhà cung cấp phổ biến
+          if grep -rnE "BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}" --exclude-dir=.git .; then
+            echo "Security violation: private key or provider token committed!"
             exit 1
           fi
