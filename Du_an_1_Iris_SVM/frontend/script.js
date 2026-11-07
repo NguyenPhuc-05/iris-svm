@@ -185,10 +185,37 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Nút hiện/ẩn mật khẩu (dùng chung cho đăng nhập và đăng ký)
+    const authPassInput = document.getElementById('auth-pass');
+    const authPassToggle = document.getElementById('auth-pass-toggle');
+
+    function setPasswordVisible(visible) {
+        if (!authPassInput || !authPassToggle) return;
+        authPassInput.type = visible ? 'text' : 'password';
+        authPassToggle.setAttribute('aria-pressed', visible ? 'true' : 'false');
+        const label = visible ? 'Ẩn mật khẩu' : 'Hiện mật khẩu';
+        authPassToggle.setAttribute('aria-label', label);
+        authPassToggle.title = label;
+    }
+
+    if (authPassToggle && authPassInput) {
+        authPassToggle.addEventListener('click', () => {
+            const start = authPassInput.selectionStart;
+            const end = authPassInput.selectionEnd;
+            setPasswordVisible(authPassInput.type === 'password');
+            authPassInput.focus();
+            try { authPassInput.setSelectionRange(start, end); } catch (e) { /* bỏ qua */ }
+        });
+    }
+
     if (authSwitchBtn) {
         authSwitchBtn.addEventListener('click', () => {
             isLoginMode = !isLoginMode;
             authError.hidden = true;
+            setPasswordVisible(false);
+            if (authPassInput) {
+                authPassInput.autocomplete = isLoginMode ? 'current-password' : 'new-password';
+            }
             if (isLoginMode) {
                 authTitle.textContent = '👋 Chào mừng đến với Iris AI';
                 authSubmitBtn.textContent = 'Đăng nhập';
@@ -208,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const email = document.getElementById('auth-user').value.trim();
             const password = document.getElementById('auth-pass').value;
+            setPasswordVisible(false);
             authError.hidden = true;
             authSubmitBtn.disabled = true;
             authSubmitBtn.textContent = 'Đang xử lý...';
@@ -296,7 +324,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const authPass = document.getElementById('auth-pass');
         const authError = document.getElementById('auth-error');
         if (authUser) authUser.value = '';
-        if (authPass) authPass.value = '';
+        if (authPass) {
+            authPass.value = '';
+            authPass.autocomplete = 'current-password';
+        }
+        setPasswordVisible(false);
         if (authError) authError.hidden = true;
 
         isLoginMode = true;
