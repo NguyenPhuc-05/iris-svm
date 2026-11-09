@@ -22,7 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
 from database.db import get_db_session
-from database.models import PredictionRecord as DBPredictionRecord
+from database.models import PredictionRecord as DBPredictionRecord, register_iris_user
 from shared.auth import get_current_user
 from fastapi import Depends, Security
 from fastapi.security import HTTPBearer
@@ -192,12 +192,14 @@ def predict(data: IrisInput, current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Model returned an unknown class")
 
     probability = float(probs[prediction_idx])
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    user_id = str(current_user["id"])
 
     db = next(get_db_session())
     try:
+        register_iris_user(db, user_id, now)
         new_record = DBPredictionRecord(
-            user_id=str(current_user["id"]),
+            user_id=user_id,
             sepal_length=data.sepal_length,
             sepal_width=data.sepal_width,
             petal_length=data.petal_length,
@@ -207,7 +209,7 @@ def predict(data: IrisInput, current_user: dict = Depends(get_current_user)):
             class_id=prediction_idx,
             probability=probability,
             model_version=metadata["model_version"],
-            created_at=now
+            created_at=now.isoformat()
         )
         db.add(new_record)
         db.commit()
@@ -863,7 +865,7 @@ def admin_all_predictions(
             credentials.credentials,
             JWT_SECRET,
             algorithms=["HS256"],
-            options={"verify_aud": False},
+            audience=os.getenv("CLIENT_ID", "iris-svm-api"),
         )
         if not payload.get("is_owner"):
             raise HTTPException(status_code=403, detail="Chỉ chủ sở hữu mới có quyền truy cập")

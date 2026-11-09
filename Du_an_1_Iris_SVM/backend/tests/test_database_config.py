@@ -22,3 +22,11 @@ def test_explicit_database_url_that_cannot_connect_raises_instead_of_falling_bac
 def test_explicit_sqlite_url_connects():
     engine = connect_database("sqlite:///./test_iris.db")
     assert engine.dialect.name == "sqlite"
+
+
+def test_render_requires_explicit_postgres(monkeypatch):
+    monkeypatch.setenv("RENDER", "true")
+    with pytest.raises(RuntimeError, match="DATABASE_URL is required"):
+        connect_database(None)
+    with pytest.raises(RuntimeError, match="must point to PostgreSQL"):
+        connect_database("sqlite:///./test_iris.db")

@@ -6,13 +6,12 @@
 // ─── API Configuration ───
 const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname) || location.protocol === 'file:';
 
-const API_BASE = isLocal
-    ? 'http://127.0.0.1:8000'
-    : 'https://iris-svm-api-yfd4.onrender.com';
-
-const IDP_API_URL = isLocal
-    ? 'http://127.0.0.1:8001'
-    : 'https://identity-service-0lph.onrender.com'; // URL trên render
+const deployment = window.IRIS_DEPLOYMENT;
+if (!isLocal && (!deployment?.apiOrigin || !deployment?.identityOrigin)) {
+    throw new Error('Missing deployed service URLs. Run the frontend build command.');
+}
+const API_BASE = isLocal ? 'http://127.0.0.1:8000' : deployment.apiOrigin;
+const IDP_API_URL = isLocal ? 'http://127.0.0.1:8001' : deployment.identityOrigin;
 
 const CLIENT_ID = 'iris-svm-api';
 

@@ -1,2 +1,0 @@
-"""Identity Service Application Package."""
-

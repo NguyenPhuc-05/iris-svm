@@ -61,9 +61,8 @@ Du_an_1_Iris_SVM/
 │   ├── .env.example
 │   └── requirements.txt
 ├── database/
-│   ├── db.py                # MySQL + SQLite fallback
+│   ├── db.py                # Kết nối PostgreSQL hoặc SQLite cục bộ
 │   ├── models.py            # PredictionRecord
-│   └── idp.py               # IdP router nhúng (fallback offline)
 ├── frontend/
 │   ├── index.html
 │   ├── style.css
@@ -75,41 +74,9 @@ Du_an_1_Iris_SVM/
 
 ---
 
-## Chạy cục bộ
+## Chạy cục bộ và kiểm thử
 
-> Khởi động Identity Service trước (xem README gốc tại thư mục `iris-svm/`).
-
-```bash
-cd Du_an_1_Iris_SVM
-python -m venv .venv
-.venv\Scripts\activate            # Windows
-# source .venv/bin/activate       # Linux/macOS
-
-pip install -r backend/requirements.txt
-cp backend/.env.example backend/.env   # điền JWT_SECRET (cùng giá trị với identity-service)
-
-cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-**Frontend:**
-```bash
-cd frontend
-python -m http.server 3000
-```
-
----
-
-## Kiểm thử
-
-```bash
-cd backend
-python -m pytest tests -v
-```
-
-17 test cases kiểm tra: predict, decision boundary, kernel arena, XAI, batch CSV, lịch sử dự đoán, phân quyền SSO.
-
----
+Xem [README ở gốc kho](../README.md) để chạy Iris với Identity Service độc lập. Xem [thiết kế CSDL](../DATABASE.md) để biết cấu hình PostgreSQL trên Render.
 
 ## Huấn luyện lại
 

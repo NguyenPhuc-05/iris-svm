@@ -2,11 +2,8 @@ import os
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker, declarative_base
-
-# Dùng MySQL làm CSDL chính thức (theo yêu cầu của Giảng viên) khi chạy trên máy cá nhân.
-# Tạo database 'iris_svm' trong MySQL trước khi chạy.
-_DEFAULT_URL = "mysql+pymysql://root:@localhost:3306/iris_svm"
 
 # Thư mục chứa file SQLite fallback (cùng thư mục với module này)
 _FALLBACK_DB = Path(__file__).resolve().parent / "iris_fallback.db"
@@ -38,43 +35,30 @@ def _make_engine(url: str):
 
 
 def connect_database(explicit_url: str | None):
-    """Tạo engine cho lịch sử dự đoán.
-
-    - Nếu người triển khai ĐẶT RÕ DATABASE_URL mà không nối được: báo lỗi và dừng.
-      Tuyệt đối không lặng lẽ chuyển sang SQLite, vì SQLite trên Render bị xóa mỗi
-      lần khởi động lại, dữ liệu sẽ mất mà không ai hay biết.
-    - Nếu không đặt DATABASE_URL (chạy trên máy cá nhân): thử MySQL mặc định,
-      không được thì dùng SQLite fallback như trước.
-    """
-    if explicit_url:
-        url = normalize_db_url(explicit_url)
-        try:
-            engine = _make_engine(url)
-        except Exception as exc:
-            # Không in URL/mật khẩu ra log (log của Render có thể bị người khác xem).
-            raise RuntimeError(
-                "DATABASE_URL được đặt nhưng không kết nối được tới CSDL "
-                f"({type(exc).__name__}). Kiểm tra lại URL; service sẽ không "
-                "chuyển sang SQLite để tránh mất dữ liệu."
-            ) from None
-        print(f"[DB] Kết nối CSDL thành công: {engine.url.render_as_string(hide_password=True)}")
-        return engine
-
-    try:
-        engine = _make_engine(_DEFAULT_URL)
-        print(f"[DB] Kết nối CSDL thành công: {engine.url.render_as_string(hide_password=True)}")
-        return engine
-    except Exception:
-        print("[DB] Không kết nối được MySQL. Chuyển sang SQLite fallback.")
-        if os.getenv("RENDER"):
-            print(
-                "[DB WARNING] Đang chạy trên Render với SQLite: lịch sử dự đoán sẽ MẤT "
-                "mỗi lần khởi động lại. Đặt DATABASE_URL trỏ tới Postgres bền vững."
-            )
+    """Require a remote PostgreSQL URL on Render. SQLite is a local default."""
+    on_render = bool(os.getenv("RENDER"))
+    if not explicit_url:
+        if on_render:
+            raise RuntimeError("DATABASE_URL is required on Render (Iris PostgreSQL).")
         return create_engine(
             f"sqlite:///{_FALLBACK_DB.as_posix()}",
             connect_args={"check_same_thread": False},
         )
+
+    url = normalize_db_url(explicit_url)
+    try:
+        backend = make_url(url).get_backend_name()
+    except Exception:
+        raise RuntimeError("DATABASE_URL has an invalid format.") from None
+    if on_render and backend != "postgresql":
+        raise RuntimeError("DATABASE_URL must point to PostgreSQL on Render.")
+    try:
+        return _make_engine(url)
+    except Exception as exc:
+        raise RuntimeError(
+            "DATABASE_URL được đặt nhưng không kết nối được tới CSDL "
+            f"({type(exc).__name__}). Kiểm tra lại URL; service sẽ không chuyển sang SQLite."
+        ) from None
 
 
 DATABASE_URL = os.getenv("DATABASE_URL") or None
