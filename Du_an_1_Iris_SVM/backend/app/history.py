@@ -16,9 +16,9 @@ if os.getenv("RENDER") and (not DATA_URL.startswith("https://") or len(DATA_TOKE
     raise RuntimeError("Render requires IRIS_DATA_URL (HTTPS) and IRIS_DATA_TOKEN.")
 
 
-def wait_for_data_service(client: httpx.Client) -> None:
+def wait_for_data_service(client: httpx.Client, timeout: float) -> None:
     """Wake a sleeping instance with a read-only request before sending records."""
-    deadline = time.monotonic() + 80
+    deadline = time.monotonic() + timeout
     while (remaining := deadline - time.monotonic()) > 0:
         try:
             response = client.get("/health", timeout=min(remaining, 15))
@@ -33,11 +33,11 @@ def wait_for_data_service(client: httpx.Client) -> None:
     raise TimeoutError("Iris data service did not become ready")
 
 
-def history_request(method, path, *, params=None, payload=None):
+def history_request(method, path, *, params=None, payload=None, readiness_timeout=80):
     if DATA_URL:
         try:
             with httpx.Client(base_url=DATA_URL, timeout=15, trust_env=False) as client:
-                wait_for_data_service(client)
+                wait_for_data_service(client, readiness_timeout)
                 response = client.request(
                     method, path, params=params, json=payload,
                     headers={"Authorization": f"Bearer {DATA_TOKEN}"},

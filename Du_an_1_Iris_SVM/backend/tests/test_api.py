@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 # Configure test environment
@@ -75,6 +76,28 @@ def test_predict_setosa_sample():
     assert response.json()["class_id"] == 0
     assert response.json()["prediction"] == "setosa"
     assert response.json()["kernel"] == "rbf"
+
+
+def test_predict_returns_result_when_history_is_unavailable(monkeypatch):
+    from app import main
+
+    def unavailable(*args, **kwargs):
+        raise HTTPException(status_code=503, detail="History unavailable")
+
+    monkeypatch.setattr(main, "history_request", unavailable)
+    response = client.post(
+        "/predict",
+        json={
+            "sepal_length": 5.1,
+            "sepal_width": 3.5,
+            "petal_length": 1.4,
+            "petal_width": 0.2,
+            "kernel": "rbf",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["prediction"] == "setosa"
+    assert response.json()["id"] is None
 
 
 def test_predict_all_kernels():

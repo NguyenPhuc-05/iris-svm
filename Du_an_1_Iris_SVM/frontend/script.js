@@ -631,6 +631,11 @@ async function doPredict() {
         // Fetch Explainable AI (XAI)
         fetchXaiExplanation(body);
 
+        if (data.id === null && errEl) {
+            errEl.textContent = '⚠️ Đã có kết quả dự đoán. Chưa xác nhận được lượt này đã lưu vào lịch sử.';
+            errEl.hidden = false;
+        }
+
         // Refresh history
         loadHistoryFromDB();
 

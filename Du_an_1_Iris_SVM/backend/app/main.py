@@ -106,7 +106,7 @@ class IrisInput(BaseModel):
 
 
 class IrisPrediction(BaseModel):
-    id: int
+    id: int | None
     class_id: int
     prediction: str
     probability: float
@@ -194,21 +194,29 @@ def predict(data: IrisInput, current_user: dict = Depends(get_current_user)):
     now = datetime.now(timezone.utc)
     user_id = str(current_user["id"])
 
-    result = history_request(
-        "POST", "/records",
-        payload={
-            **data.model_dump(),
-            "user_id": user_id,
-            "prediction": label,
-            "class_id": prediction_idx,
-            "probability": probability,
-            "model_version": metadata["model_version"],
-            "created_at": now.isoformat(),
-        },
-    )
+    try:
+        result = history_request(
+            "POST", "/records",
+            payload={
+                **data.model_dump(),
+                "user_id": user_id,
+                "prediction": label,
+                "class_id": prediction_idx,
+                "probability": probability,
+                "model_version": metadata["model_version"],
+                "created_at": now.isoformat(),
+            },
+            readiness_timeout=12,
+        )
+        record_id = result["id"]
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        # The prediction succeeded even if the data service could not confirm the write.
+        record_id = None
 
     return IrisPrediction(
-        id=result["id"],
+        id=record_id,
         class_id=prediction_idx,
         prediction=label,
         probability=probability,
