@@ -1,0 +1,1 @@
+window.IRIS_DEPLOYMENT = {};

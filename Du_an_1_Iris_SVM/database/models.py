@@ -1,5 +1,34 @@
-from sqlalchemy import Column, Integer, String, Float, inspect, text
+from sqlalchemy import Column, DateTime, Integer, String, Float, inspect, text
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from database.db import Base, engine
+
+
+class IrisUser(Base):
+    """Minimal Iris profile keyed by the subject issued by the IdP."""
+
+    __tablename__ = "iris_users"
+
+    user_id = Column(String(100), primary_key=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+
+
+def register_iris_user(db, user_id, first_seen_at):
+    insert = {"postgresql": postgres_insert, "sqlite": sqlite_insert}.get(db.bind.dialect.name)
+    if insert is not None:
+        statement = insert(IrisUser).values(user_id=user_id, first_seen_at=first_seen_at)
+        db.execute(statement.on_conflict_do_nothing(index_elements=[IrisUser.user_id]))
+        return
+    if db.get(IrisUser, user_id) is not None:
+        return
+    try:
+        with db.begin_nested():
+            db.add(IrisUser(user_id=user_id, first_seen_at=first_seen_at))
+    except IntegrityError:
+        # A concurrent request may have registered the same user first.
+        if db.get(IrisUser, user_id) is None:
+            raise
 
 
 class PredictionRecord(Base):

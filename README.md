@@ -24,33 +24,16 @@ Dự án xây dựng hệ thống phân loại ba loài hoa Iris (*Setosa, Versi
 
 ---
 
-## Kiến trúc hệ thống (Architecture)
+## Kiến trúc
 
-Hệ thống hoạt động theo mô hình Microservices tách biệt giữa Định danh (SSO IdP) và Suy luận Máy học:
-1. Người dùng xác thực tập trung tại **identity-service**, nhận JWT mang claim `aud=client_id` (ví dụ: `aud: "iris-svm-api"`).
-2. Frontend đính kèm Bearer JWT này vào mọi request gửi tới **iris-svm-api**.
-3. **iris-svm-api** xác thực chữ ký số độc lập qua dependency dùng chung `shared/auth.py` bằng `JWT_SECRET` và đối sánh `aud == CLIENT_ID`.
-
-```
-Browser (Frontend)
-  │
-  ├─► [Đăng nhập/Đăng ký] ─────────► identity-service (port 8001)
-  │                                       │ (Cấp JWT có aud=client_id)
-  │   ◄── Token JWT (aud=iris-svm-api) ───┘
-  │
-  └─► [Request + Bearer JWT] ──────► iris-svm-api (port 8000)
-                                          │ (Xác minh cục bộ qua shared/auth.py)
-                                          ▼
-                                     Trả về kết quả SVM
-```
-
-| Dịch vụ | Vai trò kiến trúc | Port |
+| Thành phần | Trách nhiệm | Nơi triển khai |
 |---|---|---|
-| `identity-service` | IdP/SSO tập trung: quản lý tài khoản, cấp JWT `aud=client_id` | 8001 |
-| `iris-svm-api` | API suy luận SVM, bảo vệ bởi JWT qua `shared/auth.py` | 8000 |
-| `iris-svm-frontend` | Giao diện tương tác người dùng | 3000 |
+| Iris Frontend | Giao diện phân loại, trực quan hóa, lịch sử | Static Site |
+| Iris API | Xác minh JWT, suy luận SVM, ghi dữ liệu Iris | Web Service |
+| Iris Data Service | Hồ sơ Iris theo mã người dùng và lịch sử dự đoán | SQLite demo, hỗ trợ cấu hình PostgreSQL |
+| Identity Service | Đăng ký, đăng nhập, cấp JWT cho các dự án | Kho và Web Service riêng |
 
----
+Frontend gọi Identity Service qua HTTPS để lấy JWT có `aud=iris-svm-api`. Iris API xác minh token và gọi Iris Data Service qua HTTPS. Identity Service tự quản lý CSDL tài khoản. Hai backend dùng cùng khóa JWT trong nhóm dịch vụ tin cậy.
 
 ## Cơ sở toán học & Đánh giá thực nghiệm
 
@@ -63,125 +46,37 @@ Browser (Frontend)
 
 ## Cấu trúc thư mục
 
-```
-iris-svm/
-├── .github/workflows/ci.yml     # CI tự động (backend + frontend syntax)
-├── render.yaml                  # Cấu hình triển khai Render
-├── identity_service/            # SSO dùng chung cho các dự án
-│   ├── app/
-│   │   ├── main.py              # FastAPI: /register /login /me /admin/users
-│   │   ├── db.py                # SQLAlchemy engine (SQLite mặc định)
-│   │   └── models.py            # User, Client model + migration + seed
-│   ├── tests/
-│   │   └── test_identity.py
-│   └── requirements.txt
-├── shared/
-│   └── auth.py                  # Dependency FastAPI xác minh JWT (dùng chung)
-└── Du_an_1_Iris_SVM/
-    ├── backend/
-    │   ├── app/
-    │   │   └── main.py          # Toàn bộ endpoint API
-    │   ├── artifacts/           # 4 file .joblib mô hình đã huấn luyện
-    │   ├── scripts/
-    │   │   └── train.py         # Huấn luyện lại 4 kernel, ghi metadata.json
-    │   ├── tests/
-    │   │   └── test_api.py      # 17 test case (14 cũ + 3 test SSO)
-    │   └── requirements.txt
-    ├── database/
-    │   ├── db.py                # Kết nối MySQL (fallback SQLite)
-    │   ├── models.py            # PredictionRecord model
-    │   └── idp.py               # IdP router nhúng vào backend (fallback offline)
-    ├── frontend/
-    │   ├── index.html
-    │   ├── style.css
-    │   ├── script.js
-    │   └── images/
-    └── notebooks/
-        └── 01_eda_and_svm_experiments.ipynb
+| Vị trí | Nội dung |
+|---|---|
+| `Du_an_1_Iris_SVM/backend/` | FastAPI, bốn mô hình đã lưu, huấn luyện và kiểm thử |
+| `Du_an_1_Iris_SVM/frontend/` | HTML, CSS, JavaScript và cấu hình URL dịch vụ |
+| `Du_an_1_Iris_SVM/database/` | Kết nối SQLAlchemy và schema của Iris |
+| `shared/auth.py` | Kiểm tra JWT trong Iris API |
+| `render.yaml` | Các dịch vụ của bản thử và kho định danh độc lập |
+
+## Chạy cục bộ trên Windows
+
+1. Khởi động kho Identity Service theo README của kho đó trên cổng `8001`. Cấp client `iris-svm-api` cho Iris.
+2. Từ gốc kho Iris, tạo môi trường và sao chép tệp cấu hình mẫu.
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r Du_an_1_Iris_SVM/backend/requirements.txt
+Copy-Item Du_an_1_Iris_SVM/backend/.env.example Du_an_1_Iris_SVM/backend/.env
 ```
 
----
+Điền khóa JWT thử giống Identity Service vào tệp vừa sao chép. `DATABASE_URL` dùng SQLite cho máy cá nhân. Mở hai terminal tại gốc kho và chạy hai lệnh sau, mỗi lệnh ở một terminal.
 
-## Cài đặt & Chạy cục bộ
-
-**Yêu cầu:** Python 3.12.10 (xem `.python-version`).
-
-### Bước 1 — Identity Service (khởi động trước)
-
-```bash
-cd identity_service
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# Linux/macOS
-# source .venv/bin/activate
-
-pip install -r requirements.txt
-cp .env.example .env   # điền JWT_SECRET (chuỗi >= 32 ký tự)
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --app-dir Du_an_1_Iris_SVM --env-file Du_an_1_Iris_SVM/backend/.env --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m http.server 5500 --directory Du_an_1_Iris_SVM/frontend --bind 127.0.0.1
 ```
 
-### Bước 2 — Backend Iris SVM
-
-```bash
-cd Du_an_1_Iris_SVM
-python -m venv .venv
-.venv\Scripts\activate
-
-pip install -r backend/requirements.txt
-cp backend/.env.example backend/.env   # dùng cùng JWT_SECRET với bước 1
-
-cd backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-Swagger UI: `http://localhost:8000/docs`  
-Health check: `http://localhost:8000/health`
-
-### Bước 3 — Frontend
-
-```bash
-cd Du_an_1_Iris_SVM/frontend
-python -m http.server 3000
-```
-
-Mở `http://localhost:3000`
-
----
-
-## Biến môi trường bắt buộc (Required Environment Variables)
-
-| Biến | Dịch vụ áp dụng | Bắt buộc | Mô tả |
-|---|---|---|---|
-| `JWT_SECRET` | `identity-service` & `iris-svm-api` | **Bắt buộc** | Khóa ký JWT HMAC-SHA256 (tối thiểu 32 ký tự, phải giống hệt nhau ở cả 2 dịch vụ). |
-| `OWNER_EMAIL` | `identity-service` | **Bắt buộc** | Email tài khoản sở hữu / quản trị hệ thống (chuẩn hóa chữ thường). |
-| `OWNER_PASSWORD` | `identity-service` | **Bắt buộc** | Mật khẩu tài khoản sở hữu (tối thiểu 8 ký tự; nếu bỏ trống sẽ bỏ qua tạo tài khoản owner). |
-| `CLIENT_IDS` | `identity-service` | **Bắt buộc** | Danh sách client ID hợp lệ, phân cách bằng dấu phẩy (vd: `iris-svm-api,breast-cancer-api`). |
-| `CLIENT_ID` | `iris-svm-api` | **Bắt buộc** | ID dịch vụ của API Iris (`iris-svm-api`), dùng xác thực audience (`aud`) trong JWT. |
-| `FRONTEND_ORIGINS` | `identity-service` & `iris-svm-api` | **Bắt buộc** | Danh sách URL frontend được phép truy cập CORS, phân cách bởi dấu phẩy. |
-| `DATABASE_URL` | `iris-svm-api` | Tùy chọn | URL kết nối cơ sở dữ liệu MySQL (để trống = dùng SQLite fallback). |
-| `IDP_DATABASE_URL` | `identity-service` | Tùy chọn | URL SQLite/PostgreSQL cho IdP (mặc định: `identity.db`). |
-
-> **Lưu ý về lưu trữ trên Render (Free Tier):** CSDL SQLite trên gói Render miễn phí là **tạm thời (ephemeral)**. Khi instance restart hoặc sleep sau thời gian không hoạt động, hệ thống tệp đĩa cục bộ sẽ được reset (danh sách tài khoản và lịch sử dự đoán có thể được tạo lại từ cấu hình ban đầu).
-
----
+Mở `http://127.0.0.1:5500`. Khi chạy cục bộ, frontend gọi API ở cổng `8000` và IdP ở cổng `8001`.
 
 ## Kiểm thử
 
-```bash
-# Backend Iris SVM (20 test cases: Core SVM + SSO IdP + KKT / 3D PCA / Stress-Test)
-cd Du_an_1_Iris_SVM/backend
-python -m pytest tests -v
-
-# Identity Service
-cd identity_service
-python -m pytest -v
-```
-
-GitHub Actions chạy tự động khi push/PR vào nhánh `main`.
-
----
+GitHub Actions chạy bộ kiểm thử API trên SQLite, kiểm tra cú pháp frontend và chạy thử hồ sơ, dự đoán, lịch sử với PostgreSQL riêng trong CI.
 
 ## Huấn luyện lại mô hình
 
@@ -194,8 +89,10 @@ Sau khi huấn luyện xong, tăng `model_version` trong `metadata.json` nếu h
 
 ---
 
-## Triển khai (Render)
+## Triển khai thử trên Render
 
-`render.yaml` khai báo ba dịch vụ: `identity-service`, `iris-svm-api` và `iris-svm-frontend`. Gói Render miễn phí có thể cần vài giây khởi động lại sau khi không hoạt động — frontend sẽ tự thử lại trước khi báo lỗi.
+Tạo Blueprint riêng từ nhánh `deploy/modular-iris`. Blueprint triển khai frontend, Iris API, Iris Data Service và Identity Service. Identity Service lấy mã từ kho riêng. Các tên có đuôi `-v2` và các nhóm biến môi trường dành cho bản thử.
 
-Demo: [Frontend](https://iris-svm-frontend-6s3t.onrender.com) · [API Docs](https://iris-svm-api-yfd4.onrender.com/docs)
+Kiểm tra URL các dịch vụ trên Dashboard sau khi tạo. Nếu Render thêm hậu tố vào tên miền, cập nhật URL và CORS trong `render.yaml` rồi đồng bộ Blueprint. Hai nhóm biến môi trường tạo riêng khóa JWT và token gọi Data Service. Frontend chỉ nhận URL công khai.
+
+Iris Data Service và Identity Service dùng hai tệp SQLite riêng trên bản thử. Dữ liệu thử có thể mất khi Render ngủ hoặc triển khai lại. Xem [thiết kế CSDL](DATABASE.md) và [kế hoạch chuyển đổi](MIGRATION.md).

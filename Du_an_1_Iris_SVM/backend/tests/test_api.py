@@ -525,3 +525,14 @@ def test_label_matches_svm_decision_not_platt_argmax():
     assert batch_res.status_code == 200
     assert batch_res.json()["predictions"][0]["class_id"] == expected_pred_idx
     assert batch_res.json()["predictions"][0]["prediction"] == expected_label
+
+
+def test_owner_token_for_another_service_cannot_list_iris_predictions():
+    now = datetime.now(timezone.utc)
+    token = jwt.encode(
+        {"sub": "owner-1", "aud": "another-api", "is_owner": True,
+         "exp": now + timedelta(minutes=5)},
+        os.environ["JWT_SECRET"], algorithm="HS256",
+    )
+    res = client.get("/admin/predictions", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 401

@@ -21,8 +21,7 @@ if str(BASE_DIR) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-from database.db import get_db_session
-from database.models import PredictionRecord as DBPredictionRecord
+from backend.app.history import history_request
 from shared.auth import get_current_user
 from fastapi import Depends, Security
 from fastapi.security import HTTPBearer
@@ -192,32 +191,24 @@ def predict(data: IrisInput, current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Model returned an unknown class")
 
     probability = float(probs[prediction_idx])
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    user_id = str(current_user["id"])
 
-    db = next(get_db_session())
-    try:
-        new_record = DBPredictionRecord(
-            user_id=str(current_user["id"]),
-            sepal_length=data.sepal_length,
-            sepal_width=data.sepal_width,
-            petal_length=data.petal_length,
-            petal_width=data.petal_width,
-            kernel=data.kernel,
-            prediction=label,
-            class_id=prediction_idx,
-            probability=probability,
-            model_version=metadata["model_version"],
-            created_at=now
-        )
-        db.add(new_record)
-        db.commit()
-        db.refresh(new_record)
-        record_id = new_record.id
-    finally:
-        db.close()
+    result = history_request(
+        "POST", "/records",
+        payload={
+            **data.model_dump(),
+            "user_id": user_id,
+            "prediction": label,
+            "class_id": prediction_idx,
+            "probability": probability,
+            "model_version": metadata["model_version"],
+            "created_at": now.isoformat(),
+        },
+    )
 
     return IrisPrediction(
-        id=record_id,
+        id=result["id"],
         class_id=prediction_idx,
         prediction=label,
         probability=probability,
@@ -229,42 +220,23 @@ def predict(data: IrisInput, current_user: dict = Depends(get_current_user)):
 @app.get("/predictions", response_model=list[PredictionRecord])
 def get_predictions(limit: int = Query(default=50, le=500), current_user: dict = Depends(get_current_user)):
     """Get prediction history from database for the last 5 hours for current user."""
-    db = next(get_db_session())
-    try:
-        five_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
-        user_id_str = str(current_user["id"])
-        rows = db.query(DBPredictionRecord)\
-                 .filter(DBPredictionRecord.user_id == user_id_str)\
-                 .filter(DBPredictionRecord.created_at >= five_hours_ago)\
-                 .order_by(DBPredictionRecord.id.desc())\
-                 .limit(limit)\
-                 .all()
-        user_label = current_user.get("email") or user_id_str
-        return [
-            {
-                "id": r.id, "username": user_label, "sepal_length": r.sepal_length, "sepal_width": r.sepal_width,
-                "petal_length": r.petal_length, "petal_width": r.petal_width,
-                "kernel": r.kernel, "prediction": r.prediction, "class_id": r.class_id,
-                "probability": r.probability, "model_version": r.model_version,
-                "created_at": r.created_at
-            }
-            for r in rows
-        ]
-    finally:
-        db.close()
+    user_id = str(current_user["id"])
+    records = history_request("GET", "/records", params=history_filters(user_id, limit))
+    return [dict(record, username=current_user.get("email") or user_id) for record in records]
+
+
+def history_filters(user_id: str, limit: int | None = None) -> dict:
+    since = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
+    filters = {"user_id": user_id, "since": since}
+    if limit is not None:
+        filters["limit"] = limit
+    return filters
 
 
 @app.delete("/predictions")
 def clear_predictions(current_user: dict = Depends(get_current_user)):
     """Clear prediction history for current user."""
-    db = next(get_db_session())
-    try:
-        user_id_str = str(current_user["id"])
-        db.query(DBPredictionRecord).filter(DBPredictionRecord.user_id == user_id_str).delete()
-        db.commit()
-        return {"status": "cleared"}
-    finally:
-        db.close()
+    return history_request("DELETE", "/records", params={"user_id": str(current_user["id"])})
 
 
 @app.get("/predictions/export")
@@ -276,17 +248,7 @@ def export_predictions(current_user: dict = Depends(get_current_user)):
     except ImportError:
         raise HTTPException(status_code=500, detail="openpyxl not installed")
 
-    db = next(get_db_session())
-    try:
-        five_hours_ago = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
-        user_id_str = str(current_user["id"])
-        rows = db.query(DBPredictionRecord)\
-                 .filter(DBPredictionRecord.user_id == user_id_str)\
-                 .filter(DBPredictionRecord.created_at >= five_hours_ago)\
-                 .order_by(DBPredictionRecord.id.desc())\
-                 .all()
-    finally:
-        db.close()
+    rows = history_request("GET", "/records", params=history_filters(str(current_user["id"])))
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -301,11 +263,12 @@ def export_predictions(current_user: dict = Depends(get_current_user)):
     for cell in ws[1]:
         cell.font, cell.fill = header_font, header_fill
 
-    for r in rows:
+    for record in rows:
         ws.append([
-            r.id, r.sepal_length, r.sepal_width, r.petal_length, r.petal_width,
-            r.kernel, r.prediction, r.class_id, round(r.probability * 100, 1),
-            r.model_version, r.created_at,
+            record["id"], record["sepal_length"], record["sepal_width"],
+            record["petal_length"], record["petal_width"], record["kernel"],
+            record["prediction"], record["class_id"], round(record["probability"] * 100, 1),
+            record["model_version"], record["created_at"],
         ])
 
     for col in ws.columns:
@@ -863,31 +826,22 @@ def admin_all_predictions(
             credentials.credentials,
             JWT_SECRET,
             algorithms=["HS256"],
-            options={"verify_aud": False},
+            audience=os.getenv("CLIENT_ID", "iris-svm-api"),
         )
         if not payload.get("is_owner"):
             raise HTTPException(status_code=403, detail="Chỉ chủ sở hữu mới có quyền truy cập")
     except _jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="Token không hợp lệ")
 
-    db = next(get_db_session())
-    try:
-        records = (
-            db.query(DBPredictionRecord)
-            .order_by(DBPredictionRecord.id.desc())
-            .limit(limit)
-            .all()
-        )
-        return [
-            {
-                "id": r.id,
-                "created_at": r.created_at,
-                "kernel": r.kernel,
-                "prediction": r.prediction,
-                "probability": round(r.probability * 100, 1),
-                "model_version": r.model_version,
-            }
-            for r in records
-        ]
-    finally:
-        db.close()
+    records = history_request("GET", "/admin/records", params={"limit": limit})
+    return [
+        {
+            "id": record["id"],
+            "created_at": record["created_at"],
+            "kernel": record["kernel"],
+            "prediction": record["prediction"],
+            "probability": round(record["probability"] * 100, 1),
+            "model_version": record["model_version"],
+        }
+        for record in records
+    ]

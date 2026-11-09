@@ -1,33 +1,50 @@
+envVarGroups:
+  - name: iris-staging-identity-v2
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+  - name: iris-staging-storage-v2
+    envVars:
+      - key: IRIS_DATA_TOKEN
+        generateValue: true
+
 services:
   - type: web
-    name: identity-service
-    env: python
-    plan: free 
-    rootDir: identity_service
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    name: iris-data-v2
+    runtime: python
+    plan: free
+    buildCommand: pip install -r Du_an_1_Iris_SVM/database/requirements.txt
+    startCommand: uvicorn database.service:app --app-dir Du_an_1_Iris_SVM --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.10
-      - key: JWT_SECRET
-        sync: false
-      - key: CLIENT_IDS
-        value: iris-svm-api,breast-cancer-api
-      - key: FRONTEND_ORIGINS
-        value: https://iris-svm-frontend-6s3t.onrender.com,http://localhost:5500,http://127.0.0.1:5500,http://localhost:3000
-      - key: OWNER_EMAIL
-        value: admin@ml-dl-ai.local
-      - key: OWNER_PASSWORD
-        sync: false
-      # Postgres bền vững cho tài khoản người dùng. Để trống thì dùng SQLite
-      # tạm thời (mất dữ liệu mỗi lần Render khởi động lại).
-      - key: IDP_DATABASE_URL
-        sync: false
+      - fromGroup: iris-staging-storage-v2
 
   - type: web
-    name: iris-svm-api
-    env: python
-    plan: free 
+    name: identity-service-v2
+    repo: https://github.com/NguyenPhuc-05/identity-service
+    branch: phuc
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: ALLOW_EPHEMERAL_SQLITE
+        value: "true"
+      - key: CLIENT_IDS
+        value: iris-svm-api,project-two-api
+      - key: FRONTEND_ORIGINS
+        value: https://iris-svm-frontend-v2.onrender.com
+      - fromGroup: iris-staging-identity-v2
+
+  - type: web
+    name: iris-svm-api-v2
+    runtime: python
+    plan: free
     buildCommand: pip install -r Du_an_1_Iris_SVM/backend/requirements.txt
     startCommand: uvicorn backend.app.main:app --app-dir Du_an_1_Iris_SVM --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
@@ -36,17 +53,21 @@ services:
         value: 3.12.10
       - key: CLIENT_ID
         value: iris-svm-api
-      - key: JWT_SECRET
-        sync: false
       - key: FRONTEND_ORIGINS
-        value: https://iris-svm-frontend-6s3t.onrender.com,http://localhost:5500,http://127.0.0.1:5500,http://localhost:3000
-      # Postgres/MySQL bền vững cho lịch sử dự đoán. Để trống thì dùng SQLite
-      # tạm thời (mất dữ liệu mỗi lần Render khởi động lại).
-      - key: DATABASE_URL
-        sync: false
+        value: https://iris-svm-frontend-v2.onrender.com
+      - key: IRIS_DATA_URL
+        value: https://iris-data-v2.onrender.com
+      - fromGroup: iris-staging-identity-v2
+      - fromGroup: iris-staging-storage-v2
 
   - type: web
-    name: iris-svm-frontend
-    env: static
+    name: iris-svm-frontend-v2
+    runtime: static
     rootDir: Du_an_1_Iris_SVM/frontend
+    buildCommand: node build-config.mjs
     staticPublishPath: .
+    envVars:
+      - key: IRIS_API_URL
+        value: https://iris-svm-api-v2.onrender.com
+      - key: IDP_API_URL
+        value: https://identity-service-v2.onrender.com
