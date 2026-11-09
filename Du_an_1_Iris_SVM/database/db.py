@@ -35,11 +35,8 @@ def _make_engine(url: str):
 
 
 def connect_database(explicit_url: str | None):
-    """Require a remote PostgreSQL URL on Render. SQLite is a local default."""
-    on_render = bool(os.getenv("RENDER"))
+    """Use SQLite by default and honor an explicitly configured database."""
     if not explicit_url:
-        if on_render:
-            raise RuntimeError("DATABASE_URL is required on Render (Iris PostgreSQL).")
         return create_engine(
             f"sqlite:///{_FALLBACK_DB.as_posix()}",
             connect_args={"check_same_thread": False},
@@ -47,11 +44,9 @@ def connect_database(explicit_url: str | None):
 
     url = normalize_db_url(explicit_url)
     try:
-        backend = make_url(url).get_backend_name()
+        make_url(url)
     except Exception:
         raise RuntimeError("DATABASE_URL has an invalid format.") from None
-    if on_render and backend != "postgresql":
-        raise RuntimeError("DATABASE_URL must point to PostgreSQL on Render.")
     try:
         return _make_engine(url)
     except Exception as exc:

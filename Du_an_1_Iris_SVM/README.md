@@ -76,7 +76,7 @@ Du_an_1_Iris_SVM/
 
 ## Chạy cục bộ và kiểm thử
 
-Xem [README ở gốc kho](../README.md) để chạy Iris với Identity Service độc lập. Xem [thiết kế CSDL](../DATABASE.md) để biết cấu hình PostgreSQL trên Render.
+Xem [README ở gốc kho](../README.md) để chạy Iris với Identity Service độc lập. Xem [thiết kế CSDL](../DATABASE.md) để biết cách Iris Data Service lưu dữ liệu.
 
 ## Huấn luyện lại
 

@@ -44,7 +44,6 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/Du_an_1_Iris_SVM/backend
           DATABASE_URL: postgresql://test_runner:integration-test-only@127.0.0.1:5432/integration_test
-          RENDER: 'true'
 
   frontend-syntax:
     runs-on: ubuntu-latest

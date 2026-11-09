@@ -1,11 +1,46 @@
-databases:
-  - name: iris-data-v2
-    databaseName: iris_svm
-    user: iris_api
-    plan: free
-    ipAllowList: []
+envVarGroups:
+  - name: iris-staging-identity-v2
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+  - name: iris-staging-storage-v2
+    envVars:
+      - key: IRIS_DATA_TOKEN
+        generateValue: true
 
 services:
+  - type: web
+    name: iris-data-v2
+    runtime: python
+    plan: free
+    buildCommand: pip install -r Du_an_1_Iris_SVM/database/requirements.txt
+    startCommand: uvicorn database.service:app --app-dir Du_an_1_Iris_SVM --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - fromGroup: iris-staging-storage-v2
+
+  - type: web
+    name: identity-service-v2
+    repo: https://github.com/NguyenPhuc-05/identity-service
+    branch: phuc
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: ALLOW_EPHEMERAL_SQLITE
+        value: "true"
+      - key: CLIENT_IDS
+        value: iris-svm-api,project-two-api
+      - key: FRONTEND_ORIGINS
+        value: https://iris-svm-frontend-v2.onrender.com
+      - fromGroup: iris-staging-identity-v2
+
   - type: web
     name: iris-svm-api-v2
     runtime: python
@@ -18,14 +53,12 @@ services:
         value: 3.12.10
       - key: CLIENT_ID
         value: iris-svm-api
-      - key: JWT_SECRET
-        sync: false
       - key: FRONTEND_ORIGINS
-        sync: false
-      - key: DATABASE_URL
-        fromDatabase:
-          name: iris-data-v2
-          property: connectionString
+        value: https://iris-svm-frontend-v2.onrender.com
+      - key: IRIS_DATA_URL
+        value: https://iris-data-v2.onrender.com
+      - fromGroup: iris-staging-identity-v2
+      - fromGroup: iris-staging-storage-v2
 
   - type: web
     name: iris-svm-frontend-v2
@@ -35,6 +68,6 @@ services:
     staticPublishPath: .
     envVars:
       - key: IRIS_API_URL
-        sync: false
+        value: https://iris-svm-api-v2.onrender.com
       - key: IDP_API_URL
-        sync: false
+        value: https://identity-service-v2.onrender.com

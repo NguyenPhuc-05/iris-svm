@@ -30,10 +30,10 @@ Dự án xây dựng hệ thống phân loại ba loài hoa Iris (*Setosa, Versi
 |---|---|---|
 | Iris Frontend | Giao diện phân loại, trực quan hóa, lịch sử | Static Site |
 | Iris API | Xác minh JWT, suy luận SVM, ghi dữ liệu Iris | Web Service |
-| Iris PostgreSQL | Hồ sơ Iris theo mã người dùng và lịch sử dự đoán | PostgreSQL riêng |
+| Iris Data Service | Hồ sơ Iris theo mã người dùng và lịch sử dự đoán | SQLite demo, hỗ trợ cấu hình PostgreSQL |
 | Identity Service | Đăng ký, đăng nhập, cấp JWT cho các dự án | Kho và Web Service riêng |
 
-Frontend gọi Identity Service qua HTTPS để lấy JWT có `aud=iris-svm-api`. Iris API xác minh token và kết nối PostgreSQL của Iris. Identity Service tự quản lý CSDL tài khoản. Hai backend dùng cùng khóa JWT trong nhóm dịch vụ tin cậy.
+Frontend gọi Identity Service qua HTTPS để lấy JWT có `aud=iris-svm-api`. Iris API xác minh token và gọi Iris Data Service qua HTTPS. Identity Service tự quản lý CSDL tài khoản. Hai backend dùng cùng khóa JWT trong nhóm dịch vụ tin cậy.
 
 ## Cơ sở toán học & Đánh giá thực nghiệm
 
@@ -52,7 +52,7 @@ Frontend gọi Identity Service qua HTTPS để lấy JWT có `aud=iris-svm-api`
 | `Du_an_1_Iris_SVM/frontend/` | HTML, CSS, JavaScript và cấu hình URL dịch vụ |
 | `Du_an_1_Iris_SVM/database/` | Kết nối SQLAlchemy và schema của Iris |
 | `shared/auth.py` | Kiểm tra JWT trong Iris API |
-| `render.yaml` | Hai dịch vụ Iris và một tài nguyên PostgreSQL độc lập |
+| `render.yaml` | Các dịch vụ của bản thử và kho định danh độc lập |
 
 ## Chạy cục bộ trên Windows
 
@@ -91,9 +91,8 @@ Sau khi huấn luyện xong, tăng `model_version` trong `metadata.json` nếu h
 
 ## Triển khai thử trên Render
 
-1. Chuẩn bị URL HTTPS của Identity Service độc lập. Cấu hình client `iris-svm-api` và khóa JWT dùng chung trong biến môi trường của hai backend.
-2. Tạo Blueprint thử từ nhánh đã kiểm tra. `render.yaml` khai báo `iris-svm-api-v2`, `iris-svm-frontend-v2` và `iris-data-v2`. Iris API nhận `DATABASE_URL` qua `fromDatabase.connectionString` và từ chối khởi động trên Render nếu URL không trỏ tới PostgreSQL.
-3. Đặt `IRIS_API_URL` và `IDP_API_URL` của Static Site thành hai HTTPS origin đã xác nhận. Bước build ghi các URL công khai vào `deployment-config.js`.
-4. Cập nhật `FRONTEND_ORIGINS` ở Iris API và IdP bằng origin chính xác của frontend vừa triển khai. Thử đăng nhập, dự đoán và đọc lại lịch sử sau khi khởi động lại Iris API.
+Tạo Blueprint riêng từ nhánh `deploy/modular-iris`. Blueprint triển khai frontend, Iris API, Iris Data Service và Identity Service. Identity Service lấy mã từ kho riêng. Các tên có đuôi `-v2` và các nhóm biến môi trường dành cho bản thử.
 
-Các tên `-v2` dành cho bản kiểm chứng song song. Kiểm tra gói PostgreSQL hiển thị trên Render trước khi xác nhận tạo tài nguyên. Xem [ranh giới dữ liệu](DATABASE.md) và [kế hoạch chuyển đổi](MIGRATION.md).
+Kiểm tra URL các dịch vụ trên Dashboard sau khi tạo. Nếu Render thêm hậu tố vào tên miền, cập nhật URL và CORS trong `render.yaml` rồi đồng bộ Blueprint. Hai nhóm biến môi trường tạo riêng khóa JWT và token gọi Data Service. Frontend chỉ nhận URL công khai.
+
+Iris Data Service và Identity Service dùng hai tệp SQLite riêng trên bản thử. Dữ liệu thử có thể mất khi Render ngủ hoặc triển khai lại. Xem [thiết kế CSDL](DATABASE.md) và [kế hoạch chuyển đổi](MIGRATION.md).
